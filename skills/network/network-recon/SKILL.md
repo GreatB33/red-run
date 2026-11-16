@@ -369,6 +369,15 @@ version detection, script scanning, and traceroute. `-p-` scans all 65535
 ports. `-T4` is aggressive timing suitable for most networks. `-oA` saves in
 all formats (`.nmap`, `.gnmap`, `.xml`).
 
+**Expect this to exceed a foreground command's timeout.** A `-p-` full-port
+scan reliably runs past 60–300s depending on target and network — this has
+been observed consistently across engagements, not as an edge case. When
+running it via Bash directly (outside MCP/handoff), start it with background
+execution (e.g. `run_in_background: true`) up front rather than letting it
+hit the default foreground timeout and get auto-backgrounded mid-command;
+either way, treat `-p-` as asynchronous and check back for results instead of
+waiting on it like a normal command.
+
 ### Host Appears Down — `-Pn` Retry
 
 If the scan returns **0 hosts up** (nmap's host discovery probes got no
@@ -463,6 +472,11 @@ grep "Ports:" scan_HOSTNAME.gnmap | sed 's/Ports: //' | tr ',' '\n'
 ### Nmap scan runs slowly or hangs
 - Use `-T4` for speed. Drop to `-T3` if getting rate-limited or missing ports.
 - On large subnets, start with `--top-ports 1000` before doing `-p-`.
+- `-p-` full-port scans routinely exceed foreground command timeouts — 60s,
+  120s, and 300s have all been observed getting hit on different targets —
+  and get moved to background automatically. This is expected behavior for a
+  full scan, not a failure: start the scan already backgrounded (don't wait
+  on it in the foreground) and poll the output file or task status instead.
 
 ### Host appears down (0 hosts up)
 - Retry with `-Pn` added to the same scan options (see "Host Appears Down"

